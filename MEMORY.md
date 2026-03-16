@@ -15,6 +15,7 @@
 6. [数据持久化机制](#6-数据持久化机制)
 7. [目录结构说明](#7-目录结构说明)
 8. [常见问题排查](#8-常见问题排查)
+9. [sentinel-alert Skill 安装指南](#9-sentinel-alert-skill-安装指南)
 
 ---
 
@@ -317,6 +318,26 @@ docker run -d \
 
 ---
 
+### Q: sentinel-alert Skill 没有生效，前端收不到 AI 员工消息
+
+**原因：**
+1. `/root/.openclaw/skills/sentinel-alert/node_modules/` 不存在（npm 依赖未安装）。
+2. Skill 目录不在 `/root/.openclaw/skills/` 下（路径错误）。
+3. OpenClaw 网关重启前加载了旧状态。
+
+**解决（在 ttyd 终端执行）：**
+
+```bash
+# 重新安装并让 OpenClaw 自检
+cp -r /app/skills/sentinel-alert /root/.openclaw/skills/
+npm install --prefix /root/.openclaw/skills/sentinel-alert --omit=dev
+node /app/dist/entry.js doctor --fix
+```
+
+详细步骤见 **[第 9 节：sentinel-alert Skill 安装指南](#9-sentinel-alert-skill-安装指南)**。
+
+---
+
 ### Q: 如何手动触发一次回测？
 
 进入 ttyd Web 终端（访问 `/term`）：
@@ -333,6 +354,133 @@ python3 /app/backtest_engine.py --csv /path/to/data.csv --output /tmp/result.png
 ```
 
 回测结果图表保存在执行目录（默认 `backtest_result.png`），可通过 ttyd 终端的文件浏览功能查看。
+
+---
+
+## 9. sentinel-alert Skill 安装指南
+
+`sentinel-alert` 是系统的前端消息路由层：它订阅 Redis `OPENCLAW_ALERTS` 频道，将四大 AI 员工的播报通过 OpenClaw 的 `chat.broadcast` 接口实时推送至前端 UI。
+
+> **工作原理：** OpenClaw 在启动时会自动扫描 `/root/.openclaw/skills/` 目录，凡包含有效 `manifest.json` 的子目录均会被自动加载为 Skill，**无需手动在 UI 中注册**。
+
+---
+
+### 9.1 场景一：Docker 部署（推荐，已自动完成）
+
+Dockerfile 在镜像构建阶段已完成 Skill 的安装和 npm 依赖安装：
+
+```dockerfile
+# Dockerfile 第 12 步（已内置，无需手动执行）
+COPY skills/sentinel-alert/ /root/.openclaw/skills/sentinel-alert/
+RUN npm install --prefix /root/.openclaw/skills/sentinel-alert \
+        --omit=dev --silent \
+    && npm cache clean --force
+```
+
+容器启动时，`start_hf.sh` 还有一个安全兜底检查：
+
+```bash
+# 若 node_modules 因某种原因丢失，自动重新安装
+SKILL_DIR="/root/.openclaw/skills/sentinel-alert"
+if [ -f "$SKILL_DIR/package.json" ] && [ ! -d "$SKILL_DIR/node_modules" ]; then
+    npm install --prefix "$SKILL_DIR" --silent --omit=dev
+fi
+```
+
+**结论：使用 Docker 部署时，无需任何额外操作，Skill 已自动安装。**
+
+---
+
+### 9.2 场景二：在运行中的容器内手动安装（ttyd 终端或 docker exec）
+
+如果 Skill 文件因重启/数据恢复等原因丢失，在 ttyd Web 终端（访问 `/term`）或 `docker exec` 中依次执行：
+
+```bash
+# 第一步：将 Skill 源码复制到 OpenClaw skills 目录
+cp -r /app/skills/sentinel-alert /root/.openclaw/skills/
+
+# 第二步：安装 npm 依赖（仅 redis 包，约 2 秒）
+npm install --prefix /root/.openclaw/skills/sentinel-alert --omit=dev
+
+# 第三步：让 OpenClaw 重新自检并加载新 Skill
+node /app/dist/entry.js doctor --fix
+
+# 验证：查看 Skill 目录结构
+ls -la /root/.openclaw/skills/sentinel-alert/
+# 应包含: index.js  manifest.json  package.json  node_modules/
+```
+
+如果 `doctor --fix` 后 Skill 仍未生效，重启 OpenClaw 网关即可（在 ttyd 中）：
+
+```bash
+# 找到 OpenClaw 网关进程 PID
+pgrep -f "entry.js gateway"
+
+# 终止旧进程并重启
+kill <PID>
+PORT=7861 node /app/dist/entry.js gateway &
+```
+
+---
+
+### 9.3 场景三：本地开发环境安装
+
+在本地机器上开发调试时：
+
+```bash
+# 进入 Skill 源码目录，安装依赖
+cd /path/to/aigp/skills/sentinel-alert
+npm install
+
+# 将 Skill 复制到本地 OpenClaw 目录（路径因系统而异）
+cp -r . ~/.openclaw/skills/sentinel-alert/
+
+# 重启本地 OpenClaw
+openclaw restart   # 或直接 Ctrl+C 后重新启动
+```
+
+---
+
+### 9.4 安装后验证方法
+
+```bash
+# 方法一：检查 Skill 目录和依赖是否存在
+ls /root/.openclaw/skills/sentinel-alert/node_modules/redis
+
+# 方法二：向 Redis 频道发送测试消息，检查 OpenClaw 前端是否弹出通知
+redis-cli PUBLISH OPENCLAW_ALERTS \
+  '{"type":"测试","content":"sentinel-alert 安装验证","source":"Sentinel-A","level":"info"}'
+
+# 方法三：查看 OpenClaw 网关日志中是否有 Skill 加载成功信息
+docker logs -f sentinel 2>&1 | grep -i "sentinel-alert\|Multi-Agent Hub\|skill"
+# 正常输出示例：
+# [Multi-Agent Hub] 初始化中... 监控 AI 员工: Sentinel-A, Analyst-B, Guardian-C, Scout-D
+# ✅ [Multi-Agent Hub] 已连接至 Redis，监听频道: OPENCLAW_ALERTS
+
+# 方法四：检查 Redis 心跳键（守护进程正常运行时应有值）
+redis-cli GET sentinel:heartbeat
+redis-cli GET analyst:heartbeat
+redis-cli GET guardian:heartbeat
+redis-cli GET scout:heartbeat
+```
+
+---
+
+### 9.5 Skill 文件说明
+
+| 文件 | 说明 |
+|---|---|
+| `manifest.json` | Skill 元数据：名称、版本、权限声明（`chat:write`、`system:events`）。OpenClaw 通过此文件发现并加载 Skill。 |
+| `index.js` | Skill 主逻辑：连接 Redis → 订阅 `OPENCLAW_ALERTS` → 格式化消息（含 Agent 图标和级别前缀）→ 调用 `app.chat.broadcast()` 推送至前端。 |
+| `package.json` | npm 依赖声明，唯一外部依赖为 `redis@^4.6.14`。 |
+
+### 9.6 Skill 使用的环境变量
+
+`index.js` 内部会读取 `REDIS_URL` 环境变量（与 Python 守护进程共享同一变量名）：
+
+| 变量名 | 默认值 | 说明 |
+|---|---|---|
+| `REDIS_URL` | `redis://127.0.0.1:6379` | Redis 连接地址，Skill 通过此地址订阅消息总线 |
 
 ---
 
