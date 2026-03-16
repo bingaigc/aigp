@@ -68,8 +68,8 @@ RUN npm install -g npm@latest --quiet \
 RUN mkdir -p /root/.openclaw/skills /root/.openclaw/agents /root/.openclaw/personas \
     && chmod -R 755 /root/.openclaw
 
-# ── 7. Nginx 反向代理配置 ─────────────────────────────────────────────────────
-COPY nginx.conf /etc/nginx/sites-available/default
+# ── 7. Nginx 反向代理配置（完整主配置，含全局调优参数） ──────────────────────────
+COPY nginx.conf /etc/nginx/nginx.conf
 
 # ── 8. OpenClaw 配置初始化脚本 ────────────────────────────────────────────────
 COPY config.py   /app/config.py

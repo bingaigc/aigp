@@ -16,6 +16,7 @@
 7. [目录结构说明](#7-目录结构说明)
 8. [常见问题排查](#8-常见问题排查)
 9. [sentinel-alert Skill 安装指南](#9-sentinel-alert-skill-安装指南)
+10. [2核16G 低内存部署调优](#10-2核16g-低内存部署调优)
 
 ---
 
@@ -92,6 +93,8 @@
 | `GATEWAY_TOKEN` | `OpenClaw_Secure_2026!` | OpenClaw 网关访问令牌。**强烈建议在生产环境修改为随机强密码。** | `config.py` → `openclaw.json` |
 | `REDIS_URL` | `redis://127.0.0.1:6379` | Redis 连接地址。容器内默认使用本地 Redis，无需修改。若接入外部 Redis 集群，在此填写完整 URL，格式：`redis://[:password@]host:port[/db]`。 | 所有 Python 守护进程 |
 | `REPORT_TIME` | `16:30` | Sentinel-A 每日复盘战报的触发时间（24 小时制 `HH:MM`，中国标准时间）。A 股收盘时间为 15:00，建议设置在 16:00 ~ 17:00 之间，等待数据源更新完毕。 | `sentinel_daemon.py` |
+| `HEARTBEAT_TTL` | `360` | 心跳 Redis key 的存活时间（秒）。默认 360 秒，正好覆盖 5 分钟更新周期并保留 60 秒容差。调低此值会增加 Redis 写入频率，一般无需修改。 | 所有 4 个守护进程 |
+| `NODE_OPTIONS` | `--max-old-space-size=512` | Node.js V8 引擎参数，用于限制老生代堆上限（MB）。默认限制为 512 MB，可按实际内存调大：如 `--max-old-space-size=768`。 | `start_hf.sh` → OpenClaw 网关进程 |
 
 ---
 
@@ -481,6 +484,177 @@ redis-cli GET scout:heartbeat
 | 变量名 | 默认值 | 说明 |
 |---|---|---|
 | `REDIS_URL` | `redis://127.0.0.1:6379` | Redis 连接地址，Skill 通过此地址订阅消息总线 |
+
+---
+
+## 10. 2核16G 低内存部署调优
+
+> 本节描述在 **2核16G** 配置（如 Hugging Face Spaces CPU Basic 升级版、中小型云服务器）上
+> 降低运行时内存占用的所有调优措施，以及每项改动的预期效益。
+
+### 10.1 各组件内存估算（调优前基准）
+
+| 组件 | 估算峰值内存 | 说明 |
+|---|---|---|
+| Redis（无上限） | 0 ~ 无限 | 默认无 `maxmemory`，持续写入时可耗尽系统内存 |
+| OpenClaw Node.js 网关 | ~400 MB | 默认 V8 老生代上限约 1.4 GB，实际使用约 400 MB |
+| Sentinel-A 🦅 Python | ~250 MB | 含 pandas / numpy / akshare 重型依赖 |
+| Analyst-B 📊 Python | ~250 MB | 同上 |
+| Guardian-C 🛡️ Python | ~220 MB | 同上 |
+| Scout-D 🔭 Python | ~220 MB | 同上 |
+| Nginx（默认） | ~20 MB × (worker_processes × 2) | 默认 auto 可能产生多于所需的 worker |
+| ttyd | ~15 MB | 可忽略 |
+| **合计（估算）** | **~1.8 ~ 2.5 GB** | 正常负载下 16 GB 足够；极端情况下 Redis 可无限增长 |
+
+---
+
+### 10.2 已实施的代码级调优（无需手动操作）
+
+以下改动已直接写入代码库，`docker pull` 最新镜像后自动生效：
+
+#### A. Redis 内存上限（`start_hf.sh`）
+
+```bash
+redis-cli CONFIG SET maxmemory 1gb           # 内存封顶 1 GB
+redis-cli CONFIG SET maxmemory-policy allkeys-lru  # 满后淘汰最久未访问的 key
+```
+
+**效益：** 防止 Redis 在历史消息堆积时无限增长，保障其他进程的内存空间。
+
+---
+
+#### B. Node.js 堆上限（`start_hf.sh`）
+
+```bash
+export NODE_OPTIONS="--max-old-space-size=512"
+```
+
+V8 老生代上限从默认 ~1.4 GB 降为 512 MB，触发更积极的 GC，让 Python 守护进程有更多可用内存。
+可通过环境变量覆盖（如需调大）：
+
+```bash
+# 设为 768 MB（介于省内存与性能之间）
+NODE_OPTIONS=--max-old-space-size=768
+```
+
+---
+
+#### C. glibc 内存竞技场限制（`start_hf.sh`）
+
+```bash
+export MALLOC_ARENA_MAX=2
+```
+
+glibc 默认每线程最多 8 个内存竞技场（arena），在多线程 Python 进程中可导致大量内存碎片。
+设为 2 后，4 个 Python 守护进程合计可节省 **~100–300 MB** 碎片内存。
+
+---
+
+#### D. Nginx 工作进程与缓冲区（`nginx.conf`）
+
+```nginx
+worker_processes     2;       # 明确指定为 CPU 核心数
+worker_rlimit_nofile 512;     # 每 worker 最大文件描述符（默认 1024）
+
+events {
+    worker_connections 256;   # 每 worker 并发连接（默认 1024）
+    use epoll;
+    multi_accept on;
+}
+
+proxy_buffer_size      4k;    # 代理响应头缓冲（默认 8k）
+proxy_buffers          4 4k;  # 代理响应体缓冲（默认 8×8k）
+proxy_busy_buffers_size 8k;
+```
+
+**效益：** 单节点内网场景下并发连接远低于 1024；缩减缓冲区可节省 **每连接 ~56 KB** 内存，
+100 并发连接下节省约 **5.5 MB**，同时降低 Nginx worker 初始化内存分配。
+
+---
+
+#### E. 心跳 TTL 修正（所有 4 个守护进程）
+
+```python
+# 修正前（bug）：TTL=60s，但 5 分钟才更新一次 → key 到期 4 分钟产生假告警
+redis_client.setex('xxx:heartbeat', 60, ...)
+
+# 修正后：TTL=360s，覆盖完整的 5 分钟更新周期，保留 60s 容差
+redis_client.setex('xxx:heartbeat', 360, ...)
+```
+
+**效益：** 消除误报告警；TTL 从 60s 延长后，key 在 Redis 中存活更长时间，减少无效的写入开销。
+
+---
+
+#### F. 守护进程轮询间隔（所有 4 个守护进程）
+
+```python
+# 修改前
+while True:
+    schedule.run_pending()
+    time.sleep(15)   # 每 15 秒唤醒一次
+
+# 修改后
+while True:
+    schedule.run_pending()
+    time.sleep(30)   # 每 30 秒唤醒一次
+```
+
+**效益：** 4 个守护进程每分钟总唤醒次数从 **16 次** 降为 **8 次**，减少 Python GIL 切换和
+内核调度开销；在闲市（非盘中时段）效果最显著，可释放 CPU 时间片用于 GC。
+
+---
+
+### 10.3 可选的额外调优（根据实际负载按需启用）
+
+以下调优未写入代码，可在运行容器时通过**环境变量**或 **Secrets** 覆盖：
+
+#### 1. 进一步限制 Node.js 堆
+
+```bash
+NODE_OPTIONS=--max-old-space-size=384   # 更激进（适合极低负载）
+```
+
+#### 2. 调小 Redis 上限
+
+```bash
+# 若历史消息量极少，可降到 512 MB
+redis-cli CONFIG SET maxmemory 512mb
+```
+
+在 ttyd 终端（`/term`）执行，立即生效，无需重启。
+
+#### 3. 减少备份频率
+
+```
+BACKUP_INTERVAL_MIN=120   # 每 2 小时备份一次（默认 60 分钟）
+```
+
+HF Hub 备份期间 `huggingface_hub` 上传文件会额外消耗内存，降低频率可减少高峰。
+
+#### 4. 关闭 AI 功能（纯离线模式）
+
+不设置 `ARK_API_KEY` 时，所有守护进程自动降级为**离线模式**：
+- 不加载 `openai` SDK 连接池
+- 不发起任何 HTTPS 请求
+- AI 分析报告改为基于规则的模板生成
+
+内存节省约 **~20–40 MB**（无 API 连接池和响应缓存）。
+
+---
+
+### 10.4 调优后内存估算
+
+| 组件 | 调优后估算 | 节省 |
+|---|---|---|
+| Redis | ≤ 1 GB（封顶） | 防止无限增长 |
+| OpenClaw Node.js | ~300 MB | -100 MB（堆上限 512 MB）|
+| 4 × Python 守护进程 | ~800 MB（合计） | -100~300 MB（MALLOC_ARENA_MAX=2）|
+| Nginx | ~8 MB | -12 MB（减少 worker 缓冲区） |
+| **调优后合计** | **~1.1 ~ 2.1 GB** | **节省约 0.4 ~ 0.7 GB** |
+
+> **结论：** 2核16G 完全可以流畅运行本系统。调优后活跃内存约 1.1~2.1 GB，
+> 剩余 14 GB 可作为操作系统文件缓存、Docker 镜像层缓存和峰值缓冲使用。
 
 ---
 

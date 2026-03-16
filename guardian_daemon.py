@@ -31,6 +31,7 @@ ARK_MODEL_ID = os.environ.get('ARK_MODEL_ID', 'ep-20260312230909-pskjv')
 REDIS_URL    = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
 CHANNEL      = 'OPENCLAW_ALERTS'
 AGENT_NAME   = 'Guardian-C'
+HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
 # 风险阈值
 RISK_HIGH_THRESHOLD    = 7.0   # 风险系数超过此值发出预警
@@ -225,7 +226,7 @@ def risk_scan() -> None:
 # ── 心跳 ─────────────────────────────────────────────────────────────────────
 def heartbeat() -> None:
     try:
-        redis_client.setex('guardian:heartbeat', 60, datetime.datetime.now().isoformat())
+        redis_client.setex('guardian:heartbeat', HEARTBEAT_TTL, datetime.datetime.now().isoformat())
     except Exception as exc:
         log.warning('心跳写入失败: %s', exc)
 
@@ -240,4 +241,4 @@ risk_scan()  # 启动时立即执行一次
 
 while True:
     schedule.run_pending()
-    time.sleep(15)
+    time.sleep(30)

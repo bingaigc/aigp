@@ -27,6 +27,7 @@ ARK_MODEL_ID = os.environ.get('ARK_MODEL_ID', 'ep-20260312230909-pskjv')
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
 REDIS_CHANNEL = 'OPENCLAW_ALERTS'
 REPORT_TIME = os.environ.get('REPORT_TIME', '16:30')  # 可通过环境变量调整
+HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
 # ── 客户端 ──────────────────────────────────────────────────────────────────
 ai_client: Client | None = None
@@ -158,7 +159,7 @@ def generate_daily_report() -> None:
 def heartbeat() -> None:
     """向 Redis 写入心跳，供前端判断守护进程是否存活。"""
     try:
-        redis_client.setex('sentinel:heartbeat', 60, datetime.datetime.now().isoformat())
+        redis_client.setex('sentinel:heartbeat', HEARTBEAT_TTL, datetime.datetime.now().isoformat())
     except Exception as exc:
         log.warning('心跳写入失败: %s', exc)
 
@@ -172,4 +173,4 @@ heartbeat()  # 立即写入首次心跳
 
 while True:
     schedule.run_pending()
-    time.sleep(15)
+    time.sleep(30)

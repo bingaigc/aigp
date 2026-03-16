@@ -16,6 +16,14 @@ err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR: $*${NC}"; }
 # ── 备份间隔（分钟，可通过环境变量覆盖；默认 60 分钟，降低 HF Hub API 调用频率） ─
 BACKUP_INTERVAL_MIN="${BACKUP_INTERVAL_MIN:-60}"
 
+# ── 2核16G 低内存调优：限制 glibc 内存竞技场，减少碎片 ─────────────────────────
+export MALLOC_ARENA_MAX=2
+# 限制 Node.js 老生代堆上限（默认 ~1.4 GB），为 Python 守护进程留出空间
+# 允许外部环境变量 NODE_OPTIONS 覆盖（如需调大堆，设置 NODE_OPTIONS=--max-old-space-size=768）
+if [ -z "${NODE_OPTIONS:-}" ]; then
+    export NODE_OPTIONS="--max-old-space-size=512"
+fi
+
 # ── PID 追踪（优雅退出） ───────────────────────────────────────────────────────
 PIDS=()
 cleanup() {
@@ -49,6 +57,12 @@ for i in $(seq 1 10); do
 done
 redis-cli ping &>/dev/null || { err "Redis 启动失败，退出。"; exit 1; }
 log "Redis 已就绪 ✓"
+
+# ── 2核16G 低内存调优：限制 Redis 最大内存，防止无上限增长 ──────────────────────
+# allkeys-lru: 内存满时自动淘汰最近最少使用的 key，确保系统稳定
+redis-cli CONFIG SET maxmemory 1gb           >/dev/null
+redis-cli CONFIG SET maxmemory-policy allkeys-lru >/dev/null
+log "Redis 内存上限已设为 1 GB (allkeys-lru) ✓"
 
 # ── 2. 初始化 OpenClaw 配置（含多智能体注册） ─────────────────────────────────
 log "--- 初始化 OpenClaw 环境（注册 4 个 AI 员工）---"

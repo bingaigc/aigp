@@ -102,7 +102,7 @@ module.exports = async function registerSkill(app) {
 
     await connectWithRetry();
 
-    // 心跳检查：每分钟确认所有 AI 员工的守护进程存活
+    // 心跳检查：每2分钟确认所有 AI 员工的守护进程存活（心跳 TTL 为 360s，每5分钟更新）
     setInterval(async () => {
         try {
             if (!subscriber || !subscriber.isOpen) return;
@@ -113,5 +113,5 @@ module.exports = async function registerSkill(app) {
                 }
             }
         } catch (_) { /* 静默忽略心跳检查失败 */ }
-    }, 60_000);
+    }, 120_000);
 };

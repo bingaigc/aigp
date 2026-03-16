@@ -31,6 +31,7 @@ ARK_MODEL_ID = os.environ.get('ARK_MODEL_ID', 'ep-20260312230909-pskjv')
 REDIS_URL    = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
 CHANNEL      = 'OPENCLAW_ALERTS'
 AGENT_NAME   = 'Scout-D'
+HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
 # 筛选阈值
 MIN_SEAL_FUND_WAN = 10_000   # 最低封板资金（万元）：1 亿元
@@ -221,7 +222,7 @@ def late_session_scout() -> None:
 # ── 心跳 ─────────────────────────────────────────────────────────────────────
 def heartbeat() -> None:
     try:
-        redis_client.setex('scout:heartbeat', 60, datetime.datetime.now().isoformat())
+        redis_client.setex('scout:heartbeat', HEARTBEAT_TTL, datetime.datetime.now().isoformat())
     except Exception as exc:
         log.warning('心跳写入失败: %s', exc)
 
@@ -237,4 +238,4 @@ heartbeat()
 
 while True:
     schedule.run_pending()
-    time.sleep(15)
+    time.sleep(30)
