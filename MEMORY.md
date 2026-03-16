@@ -73,6 +73,26 @@
 
 ## 2. 环境变量完整列表
 
+> **速查表 — 按优先级排列，标★为强烈推荐配置**
+
+| 变量名 | 必填 | 默认值 | 用途 |
+|---|---|---|---|
+| `ARK_API_KEY` | ★ 推荐 | 无 | DeepSeek AI 分析 Key |
+| `GATEWAY_TOKEN` | ★ 推荐 | `OpenClaw_Secure_2026!` | OpenClaw 网关安全令牌 |
+| `HF_TOKEN` | 仅HF | 无 | HF Hub 备份令牌 |
+| `HF_DATASET` | 仅HF | 无 | HF Hub 备份仓库 ID |
+| `ARK_MODEL_ID` | 可选 | `ep-20260312230909-pskjv` | 模型端点 ID |
+| `REDIS_URL` | 可选 | `redis://127.0.0.1:6379` | Redis 连接地址 |
+| `REPORT_TIME` | 可选 | `16:30` | 每日复盘触发时间 |
+| `OPENCLAW_CHANNEL_ID` | 可选 | 无 | OpenClaw 全局推送频道 ID |
+| `SENTINEL_A_CHANNEL_ID` | 可选 | 无 | Sentinel-A 专属频道 ID |
+| `ANALYST_B_CHANNEL_ID` | 可选 | 无 | Analyst-B 专属频道 ID |
+| `GUARDIAN_C_CHANNEL_ID` | 可选 | 无 | Guardian-C 专属频道 ID |
+| `SCOUT_D_CHANNEL_ID` | 可选 | 无 | Scout-D 专属频道 ID |
+| `HEARTBEAT_TTL` | 可选 | `360` | 心跳 key 存活时间（秒）|
+| `NODE_OPTIONS` | 可选 | `--max-old-space-size=512` | Node.js 内存上限 |
+| `BACKUP_INTERVAL_MIN` | 可选 | `60` | HF 备份间隔（分钟）|
+
 ### 2.1 必填变量（不设则 AI 功能完全离线）
 
 | 变量名 | 示例值 | 说明 | 用于 |
@@ -107,6 +127,51 @@
 | `BACKUP_INTERVAL_MIN` | `60` | `60` | 定时自动备份间隔（分钟）。每次备份会调用 HF Hub API 上传 `/root/.openclaw`（排除日志和 `node_modules`）。频率过高（< 30 分钟）可能触发 HF Hub 速率限制，**不建议低于 30**。 |
 
 > ⚠️ **安全提醒：** `HF_TOKEN` 和 `ARK_API_KEY` 是高权限凭证，请务必通过 HF Spaces 的加密 **Secrets** 功能配置，**绝对不要**硬编码在代码或 Dockerfile 中。
+
+---
+
+### 2.5 OpenClaw 频道绑定变量（推送至 Agent 专属频道）
+
+> 这是让消息精确推送到 **OpenClaw 中每个 Agent 绑定的专属会话频道** 的关键配置。
+> 不配置时，Skill 回退到 `agentId` 路由 + 全局广播（消息会出现在所有打开的会话窗口）。
+
+**如何获取频道 ID：**
+1. 在 OpenClaw 前端打开某个 Agent 的对话窗口
+2. 查看浏览器地址栏：`https://.../chat?channelId=abc123def456`（`channelId` 参数即为频道 ID）
+3. 或调用管理 API：`GET http://127.0.0.1:7861/api/channels?agentId=sentinel-a`
+
+| 变量名 | 默认值 | 说明 | 用于 |
+|---|---|---|---|
+| `OPENCLAW_CHANNEL_ID` | 无 | **全局覆盖**：所有 Agent 的消息统一推送至此频道 ID。适合单频道模式（一个聊天窗口接收所有 Agent 消息）。优先级最高，会覆盖各 Agent 专属频道。 | `skills/sentinel-alert/index.js` |
+| `SENTINEL_A_CHANNEL_ID` | 无 | Sentinel-A 🦅 的专属 OpenClaw 频道 ID。设置后，主控哨兵的每日战报和预警将只推送到此频道。 | `skills/sentinel-alert/index.js` + `config.py` |
+| `ANALYST_B_CHANNEL_ID` | 无 | Analyst-B 📊 的专属 OpenClaw 频道 ID。设置后，板块轮动分析报告将只推送到此频道。 | `skills/sentinel-alert/index.js` + `config.py` |
+| `GUARDIAN_C_CHANNEL_ID` | 无 | Guardian-C 🛡️ 的专属 OpenClaw 频道 ID。设置后，风险预警将只推送到此频道。 | `skills/sentinel-alert/index.js` + `config.py` |
+| `SCOUT_D_CHANNEL_ID` | 无 | Scout-D 🔭 的专属 OpenClaw 频道 ID。设置后，三段侦察快报将只推送到此频道。 | `skills/sentinel-alert/index.js` + `config.py` |
+
+**消息路由优先级（高 → 低）：**
+
+```
+1. OPENCLAW_CHANNEL_ID（全局覆盖，最高优先级）
+   ↓ 未设置
+2. 各 Agent 专属频道（SENTINEL_A_CHANNEL_ID 等）
+   ↓ 未设置
+3. agentId 路由（OpenClaw 将消息归属到对应 Agent 的绑定会话）
+   ↓ 不支持
+4. 全局广播（所有活动会话均可接收，兜底）
+```
+
+**推荐配置方式（HF Spaces Secrets）：**
+
+```
+# 方案一：所有 Agent 推送到同一频道（最简单）
+OPENCLAW_CHANNEL_ID = abc123def456
+
+# 方案二：各 Agent 推送到各自专属频道（最精细）
+SENTINEL_A_CHANNEL_ID = ch_sentinel_xxxxxxx
+ANALYST_B_CHANNEL_ID  = ch_analyst_xxxxxxx
+GUARDIAN_C_CHANNEL_ID = ch_guardian_xxxxxxx
+SCOUT_D_CHANNEL_ID    = ch_scout_xxxxxxx
+```
 
 ---
 
@@ -479,11 +544,19 @@ redis-cli GET scout:heartbeat
 
 ### 9.6 Skill 使用的环境变量
 
-`index.js` 内部会读取 `REDIS_URL` 环境变量（与 Python 守护进程共享同一变量名）：
+`index.js` 内部会读取以下环境变量（与 Python 守护进程共享同一 `REDIS_URL` 变量名）：
 
 | 变量名 | 默认值 | 说明 |
 |---|---|---|
 | `REDIS_URL` | `redis://127.0.0.1:6379` | Redis 连接地址，Skill 通过此地址订阅消息总线 |
+| `OPENCLAW_CHANNEL_ID` | 无 | 全局覆盖频道 ID：所有 Agent 消息统一推送到此频道 |
+| `SENTINEL_A_CHANNEL_ID` | 无 | Sentinel-A 专属 OpenClaw 频道 ID |
+| `ANALYST_B_CHANNEL_ID` | 无 | Analyst-B 专属 OpenClaw 频道 ID |
+| `GUARDIAN_C_CHANNEL_ID` | 无 | Guardian-C 专属 OpenClaw 频道 ID |
+| `SCOUT_D_CHANNEL_ID` | 无 | Scout-D 专属 OpenClaw 频道 ID |
+
+> 频道 ID 获取方式：在 OpenClaw 前端打开 Agent 对话窗口 → 查看 URL 中的 `channelId` 参数。
+> 详细说明见 **[第 2.5 节：OpenClaw 频道绑定变量](#25-openclaw-频道绑定变量推送至-agent-专属频道)**。
 
 ---
 

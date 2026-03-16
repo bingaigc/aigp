@@ -15,6 +15,18 @@ CONFIG_PATH   = '/root/.openclaw/openclaw.json'
 PERSONA_DIR   = '/root/.openclaw/personas'
 ALERTS_CHANNEL = 'OPENCLAW_ALERTS'
 
+# ── OpenClaw 频道绑定（可通过环境变量指定每个 Agent 的专属频道 ID） ───────────────
+# 全局覆盖：所有 Agent 消息统一推送至此频道（优先级最高）
+GLOBAL_CHANNEL_ID = os.environ.get('OPENCLAW_CHANNEL_ID')
+
+# 各 Agent 专属频道 ID（未设则 Skill 使用 agentId 路由 + 广播兜底）
+AGENT_CHANNEL_IDS = {
+    'sentinel-a': os.environ.get('SENTINEL_A_CHANNEL_ID'),
+    'analyst-b':  os.environ.get('ANALYST_B_CHANNEL_ID'),
+    'guardian-c': os.environ.get('GUARDIAN_C_CHANNEL_ID'),
+    'scout-d':    os.environ.get('SCOUT_D_CHANNEL_ID'),
+}
+
 # ── 多智能体定义表 ───────────────────────────────────────────────────────────
 AGENTS = [
     {
@@ -111,6 +123,14 @@ for agent in AGENTS:
         'schedule':    agent['schedule'],
         'channel':     agent['channel'],
     }
+    # 写入专属频道绑定（让 OpenClaw 知道消息应推送到哪个频道）
+    resolved_channel_id = (
+        GLOBAL_CHANNEL_ID
+        or AGENT_CHANNEL_IDS.get(agent['id'])
+    )
+    if resolved_channel_id:
+        entry['channelId'] = resolved_channel_id
+        print(f"[config] {agent['name']} 绑定频道: {resolved_channel_id}")
     # 若 persona 文件存在，写入引用
     if os.path.exists(agent['persona']):
         entry['persona'] = agent['persona']

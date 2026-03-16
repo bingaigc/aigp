@@ -45,7 +45,7 @@
 | 心跳信号 | 每 5 分钟 | Redis `sentinel:heartbeat` 键更新 |
 
 ### 心跳键
-- `sentinel:heartbeat` — TTL=60s，每 5 分钟更新
+- `sentinel:heartbeat` — TTL=360s（`HEARTBEAT_TTL` 环境变量，默认 360），每 5 分钟更新
 
 ---
 
@@ -67,7 +67,7 @@
 - `akshare.stock_market_fund_flow()` — 主力资金净流入
 
 ### 心跳键
-- `analyst:heartbeat` — TTL=60s，每 5 分钟更新
+- `analyst:heartbeat` — TTL=360s（`HEARTBEAT_TTL` 环境变量，默认 360），每 5 分钟更新
 
 ---
 
@@ -100,7 +100,7 @@ risk_score = index_risk + emotion_risk
 ```
 guardian:status → Hash 字段: risk_score, index_change, board_health,
                               zt_count, max_board, updated_at
-guardian:heartbeat → TTL=60s
+guardian:heartbeat → TTL=360s（`HEARTBEAT_TTL` 环境变量，默认 360）
 ```
 
 > 其他 Agent（Scout-D）可读取 `guardian:status` 获取实时风险系数。
@@ -132,7 +132,7 @@ guardian:heartbeat → TTL=60s
 - 消息 level 自动升级为 `warning`
 
 ### 心跳键
-- `scout:heartbeat` — TTL=60s，每 5 分钟更新
+- `scout:heartbeat` — TTL=360s（`HEARTBEAT_TTL` 环境变量，默认 360），每 5 分钟更新
 
 ---
 
@@ -140,15 +140,23 @@ guardian:heartbeat → TTL=60s
 
 **文件**: `skills/sentinel-alert/index.js`
 **版本**: `v2.0.0`
-**功能**: 将所有 AI 员工的消息统一路由至 OpenClaw 前端
+**功能**: 将所有 AI 员工的消息路由至 OpenClaw 中各 Agent 绑定的专属频道
 
 ### Agent 路由表
-| source 字段 | 显示图标 | 显示标签 |
-|------------|---------|---------|
-| `Sentinel-A` | 🦅 | Sentinel-A 主控哨兵 |
-| `Analyst-B`  | 📊 | Analyst-B 量化分析师 |
-| `Guardian-C` | 🛡️ | Guardian-C 风控守卫 |
-| `Scout-D`    | 🔭 | Scout-D 游骑侦察 |
+| source 字段 | 显示图标 | 显示标签 | OpenClaw agentId | 频道 ID 环境变量 |
+|------------|---------|---------|-----------------|----------------|
+| `Sentinel-A` | 🦅 | Sentinel-A 主控哨兵 | `sentinel-a` | `SENTINEL_A_CHANNEL_ID` |
+| `Analyst-B`  | 📊 | Analyst-B 量化分析师 | `analyst-b` | `ANALYST_B_CHANNEL_ID` |
+| `Guardian-C` | 🛡️ | Guardian-C 风控守卫 | `guardian-c` | `GUARDIAN_C_CHANNEL_ID` |
+| `Scout-D`    | 🔭 | Scout-D 游骑侦察 | `scout-d` | `SCOUT_D_CHANNEL_ID` |
+
+### 消息路由优先级
+```
+1. OPENCLAW_CHANNEL_ID（全局覆盖）
+2. 各 Agent 专属频道 ID（SENTINEL_A_CHANNEL_ID 等）
+3. agentId 路由（OpenClaw 内部将消息归属到对应 Agent 的会话）
+4. 全局广播（兜底）
+```
 
 ### 消息格式化
 ```
