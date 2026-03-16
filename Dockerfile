@@ -72,7 +72,12 @@ RUN mkdir -p /root/.openclaw/skills /root/.openclaw/agents /root/.openclaw/perso
 COPY nginx.conf /etc/nginx/sites-available/default
 
 # ── 8. OpenClaw 配置初始化脚本 ────────────────────────────────────────────────
-COPY config.py /app/config.py
+COPY config.py   /app/config.py
+
+# ── 8b. HF Hub 数据恢复 / 备份脚本 ───────────────────────────────────────────
+COPY restore.py  /app/restore.py
+COPY backup.py   /app/backup.py
+RUN chmod +x /app/restore.py /app/backup.py
 
 # ── 9. Sentinel-A 人格定义 ────────────────────────────────────────────────────
 COPY personas/Sentinel-A.md /root/.openclaw/personas/Sentinel-A.md

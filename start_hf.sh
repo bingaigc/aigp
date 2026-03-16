@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # start_hf.sh — Sentinel 终极交易系统一键点火脚本
-# 启动顺序: Redis → OpenClaw → 四大 AI 员工守护进程 → ttyd → Nginx
+# 启动顺序: HF 恢复 → Redis → OpenClaw → 四大 AI 员工守护进程 → ttyd → Nginx
 # AI 员工: Sentinel-A 🦅 | Analyst-B 📊 | Guardian-C 🛡️ | Scout-D 🔭
+# 持久化:  启动时从 HF Hub 恢复数据；关闭时 + 定时备份到 HF Hub
 # =============================================================================
 set -euo pipefail
 
@@ -12,6 +13,9 @@ log()  { echo -e "${GREEN}[$(date +%H:%M:%S)] $*${NC}"; }
 warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] WARN: $*${NC}"; }
 err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR: $*${NC}"; }
 
+# ── 备份间隔（分钟，可通过环境变量覆盖；默认 60 分钟，降低 HF Hub API 调用频率） ─
+BACKUP_INTERVAL_MIN="${BACKUP_INTERVAL_MIN:-60}"
+
 # ── PID 追踪（优雅退出） ───────────────────────────────────────────────────────
 PIDS=()
 cleanup() {
@@ -19,10 +23,19 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
+    # ── 关闭前备份数据到 HF Hub ───────────────────────────────────────────────
+    log "关闭前触发数据备份..."
+    backup_output=$(python3 /app/backup.py 2>&1) || \
+        warn "关闭备份失败（已忽略）: ${backup_output}"
+    [ -n "${backup_output:-}" ] && echo "${backup_output}"
     service redis-server stop 2>/dev/null || true
     log "系统已安全关闭。"
 }
 trap cleanup SIGTERM SIGINT
+
+# ── 0. 从 HF Hub 恢复数据（首次部署或重启时恢复历史配置） ─────────────────────
+log "--- 恢复 HF Hub 数据 ---"
+python3 /app/restore.py || warn "数据恢复失败（跳过，继续启动）"
 
 # ── 1. 启动 Redis ─────────────────────────────────────────────────────────────
 log "--- 启动底层总线 Redis ---"
@@ -57,6 +70,7 @@ echo -e "  🦅 Sentinel-A  — 主控哨兵（每日复盘 + 实盘预警）"
 echo -e "  📊 Analyst-B   — 量化分析师（板块轮动）"
 echo -e "  🛡️  Guardian-C  — 风控守卫（实时风险监控）"
 echo -e "  🔭 Scout-D     — 游骑侦察（盘前/盘中/尾盘三段狙击）"
+echo -e "  💾 HF Backup   — 每 ${BACKUP_INTERVAL_MIN} 分钟自动备份至 HF Hub"
 echo "======================================================="
 echo ""
 
@@ -118,6 +132,20 @@ ttyd -b /term -p 7862 -W \
     done &
 PIDS+=($!)
 
-# ── 10. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）──────────────────────
+# ── 10. 启动定时备份循环（后台） ─────────────────────────────────────────────
+log "启动定时备份 💾 (间隔 ${BACKUP_INTERVAL_MIN} 分钟)..."
+(
+    BACKUP_SLEEP=$(( BACKUP_INTERVAL_MIN * 60 ))
+    while true; do
+        sleep "${BACKUP_SLEEP}"
+        python3 /app/backup.py 2>&1 | \
+            while IFS= read -r line; do
+                echo "[HF Backup  💾] $(date +%H:%M:%S) $line"
+            done
+    done
+) &
+PIDS+=($!)
+
+# ── 11. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）──────────────────────
 log "启动 Nginx 反向代理 (port 7860)..."
 exec nginx -g 'daemon off; error_log /dev/stderr error;'
