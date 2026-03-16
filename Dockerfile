@@ -77,6 +77,9 @@ COPY config.py /app/config.py
 # ── 9. Sentinel-A 人格定义 ────────────────────────────────────────────────────
 COPY personas/Sentinel-A.md /root/.openclaw/personas/Sentinel-A.md
 
+# ── 9b. OpenClaw Agent 配置文档（团队定义 / 引导 / 心跳 / 工具 / 用户手册）────
+COPY agents/ /root/.openclaw/agents/
+
 # ── 10. Sentinel-A 量化引擎守护进程 ──────────────────────────────────────────
 COPY sentinel_daemon.py /app/sentinel_daemon.py
 
