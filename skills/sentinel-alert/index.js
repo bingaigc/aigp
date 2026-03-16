@@ -1,23 +1,41 @@
 'use strict';
 /**
- * sentinel-alert — OpenClaw Skill
+ * sentinel-alert — OpenClaw Multi-Agent Hub Skill
  *
- * 订阅 Redis OPENCLAW_ALERTS 频道，将 Sentinel-A 的复盘战报和实时预警
+ * 订阅 Redis OPENCLAW_ALERTS 频道，将来自所有 AI 员工的消息
  * 通过 OpenClaw 的 chat.broadcast / session:message:inject 接口
  * 主动推送弹窗至前端 UI。
+ *
+ * 支持多 Agent 路由：根据消息中的 source 字段显示对应 Agent 标识。
  */
 const { createClient } = require('redis');
 
-const REDIS_URL    = process.env.REDIS_URL    || 'redis://127.0.0.1:6379';
-const CHANNEL      = 'OPENCLAW_ALERTS';
-const HEARTBEAT_KEY = 'sentinel:heartbeat';
-const RECONNECT_MS = 5_000;
+const REDIS_URL             = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const CHANNEL               = 'OPENCLAW_ALERTS';
+const RECONNECT_MS          = 5_000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+
+/** 每个 Agent 的显示配置 */
+const AGENT_META = {
+    'Sentinel-A': { icon: '🦅', label: 'Sentinel-A 主控哨兵' },
+    'Analyst-B':  { icon: '📊', label: 'Analyst-B 量化分析师' },
+    'Guardian-C': { icon: '🛡️', label: 'Guardian-C 风控守卫' },
+    'Scout-D':    { icon: '🔭', label: 'Scout-D 游骑侦察' },
+};
+
+/** 各 Agent 心跳键 */
+const HEARTBEAT_KEYS = {
+    'Sentinel-A': 'sentinel:heartbeat',
+    'Analyst-B':  'analyst:heartbeat',
+    'Guardian-C': 'guardian:heartbeat',
+    'Scout-D':    'scout:heartbeat',
+};
 
 /**
  * @param {import('@openclaw/sdk').App} app
  */
 module.exports = async function registerSkill(app) {
-    console.log('[Sentinel Skill] 初始化中...');
+    console.log('[Multi-Agent Hub] 初始化中... 监控 AI 员工: ' + Object.keys(AGENT_META).join(', '));
 
     let subscriber;
 
@@ -33,17 +51,26 @@ module.exports = async function registerSkill(app) {
         });
 
         await subscriber.connect();
-        console.log('✅ [Sentinel Skill] 已连接至 Redis，监听频道:', CHANNEL);
+        console.log('✅ [Multi-Agent Hub] 已连接至 Redis，监听频道:', CHANNEL);
 
         await subscriber.subscribe(CHANNEL, (raw) => {
             try {
-                const data = JSON.parse(raw);
+                const data    = JSON.parse(raw);
+                const source  = data.source  || 'Sentinel-A';
                 const type    = data.type    || '通知';
                 const content = data.content || raw;
+                const level   = data.level   || 'info';
                 const ts      = new Date().toLocaleTimeString('zh-CN', { hour12: false });
 
+                const meta    = AGENT_META[source] || { icon: '🤖', label: source };
+
+                // 根据级别选择前缀样式
+                const levelPrefix = level === 'critical' ? '🚨🚨🚨 **紧急预警**'
+                    : level === 'warning'  ? '⚠️ **风险提示**'
+                    : '📡 **实时播报**';
+
                 const finalMessage =
-                    `> **🚨 Sentinel-A 实时监控 (${type})** — ${ts}\n\n${content}`;
+                    `> ${meta.icon} **${meta.label}** · ${levelPrefix} · \`${type}\` — ${ts}\n\n${content}`;
 
                 if (app.chat && typeof app.chat.broadcast === 'function') {
                     app.chat.broadcast({ role: 'assistant', content: finalMessage });
@@ -53,10 +80,10 @@ module.exports = async function registerSkill(app) {
                         content: finalMessage,
                     });
                 } else {
-                    console.warn('[Sentinel Skill] 广播接口不可用，消息被丢弃。');
+                    console.warn('[Multi-Agent Hub] 广播接口不可用，消息被丢弃。source=', source);
                 }
             } catch (e) {
-                console.error('[Sentinel Skill] 消息解析失败:', e.message, '| 原始数据:', raw);
+                console.error('[Multi-Agent Hub] 消息解析失败:', e.message, '| 原始数据:', raw);
             }
         });
     }
@@ -67,7 +94,7 @@ module.exports = async function registerSkill(app) {
             await connect();
         } catch (err) {
             const boundedAttempt = Math.min(attempt, 5);
-            const delay = Math.min(RECONNECT_MS * (2 ** boundedAttempt), 60_000);
+            const delay = Math.min(RECONNECT_MS * (2 ** boundedAttempt), MAX_RECONNECT_DELAY_MS);
             console.error(`[-] Redis 连接失败 (第 ${attempt + 1} 次)，${delay / 1000}s 后重试:`, err.message);
             setTimeout(() => connectWithRetry(attempt + 1), delay);
         }
@@ -75,13 +102,15 @@ module.exports = async function registerSkill(app) {
 
     await connectWithRetry();
 
-    // 心跳检查：每分钟确认守护进程存活
+    // 心跳检查：每分钟确认所有 AI 员工的守护进程存活
     setInterval(async () => {
         try {
             if (!subscriber || !subscriber.isOpen) return;
-            const ts = await subscriber.get(HEARTBEAT_KEY);
-            if (!ts) {
-                console.warn('[Sentinel Skill] 守护进程心跳超时，Sentinel-A 可能已停止运行。');
+            for (const [agent, key] of Object.entries(HEARTBEAT_KEYS)) {
+                const ts = await subscriber.get(key);
+                if (!ts) {
+                    console.warn(`[Multi-Agent Hub] ${agent} 心跳超时，守护进程可能已停止运行。`);
+                }
             }
         } catch (_) { /* 静默忽略心跳检查失败 */ }
     }, 60_000);

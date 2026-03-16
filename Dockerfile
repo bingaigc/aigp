@@ -80,8 +80,18 @@ COPY personas/Sentinel-A.md /root/.openclaw/personas/Sentinel-A.md
 # ── 9b. OpenClaw Agent 配置文档（团队定义 / 引导 / 心跳 / 工具 / 用户手册）────
 COPY agents/ /root/.openclaw/agents/
 
+# ── 9c. 其余 AI 员工 Persona 文件 ────────────────────────────────────────────
+COPY personas/Analyst-B.md  /root/.openclaw/personas/Analyst-B.md
+COPY personas/Guardian-C.md /root/.openclaw/personas/Guardian-C.md
+COPY personas/Scout-D.md    /root/.openclaw/personas/Scout-D.md
+
 # ── 10. Sentinel-A 量化引擎守护进程 ──────────────────────────────────────────
 COPY sentinel_daemon.py /app/sentinel_daemon.py
+
+# ── 10b. 其余三个 AI 员工守护进程 ────────────────────────────────────────────
+COPY analyst_daemon.py  /app/analyst_daemon.py
+COPY guardian_daemon.py /app/guardian_daemon.py
+COPY scout_daemon.py    /app/scout_daemon.py
 
 # ── 11. 离线回测引擎 ──────────────────────────────────────────────────────────
 COPY backtest_engine.py /app/backtest_engine.py

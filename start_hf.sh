@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # start_hf.sh — Sentinel 终极交易系统一键点火脚本
-# 启动顺序: Redis → OpenClaw → ttyd → Nginx
+# 启动顺序: Redis → OpenClaw → 四大 AI 员工守护进程 → ttyd → Nginx
+# AI 员工: Sentinel-A 🦅 | Analyst-B 📊 | Guardian-C 🛡️ | Scout-D 🔭
 # =============================================================================
 set -euo pipefail
 
@@ -36,8 +37,8 @@ done
 redis-cli ping &>/dev/null || { err "Redis 启动失败，退出。"; exit 1; }
 log "Redis 已就绪 ✓"
 
-# ── 2. 初始化 OpenClaw 配置 ───────────────────────────────────────────────────
-log "--- 初始化 OpenClaw 环境 ---"
+# ── 2. 初始化 OpenClaw 配置（含多智能体注册） ─────────────────────────────────
+log "--- 初始化 OpenClaw 环境（注册 4 个 AI 员工）---"
 python3 /app/config.py || warn "config.py 执行异常（继续启动）"
 node /app/dist/entry.js doctor --fix >/dev/null 2>&1 || true
 
@@ -50,23 +51,52 @@ fi
 
 echo ""
 echo "======================================================="
-echo -e "🚀 ${GREEN}终极交易系统点火：OpenClaw + Sentinel-A + Web 终端${NC}"
+echo -e "🚀 ${GREEN}终极交易系统点火：OpenClaw + 四大 AI 员工 + Web 终端${NC}"
+echo "======================================================="
+echo -e "  🦅 Sentinel-A  — 主控哨兵（每日复盘 + 实盘预警）"
+echo -e "  📊 Analyst-B   — 量化分析师（板块轮动）"
+echo -e "  🛡️  Guardian-C  — 风控守卫（实时风险监控）"
+echo -e "  🔭 Scout-D     — 游骑侦察（盘前/盘中/尾盘三段狙击）"
 echo "======================================================="
 echo ""
 
-# ── 4. 启动 Sentinel-A 守护进程 ───────────────────────────────────────────────
-log "启动 Sentinel-A 量化守护进程..."
+# ── 4. 启动 Sentinel-A 守护进程（主控哨兵） ───────────────────────────────────
+log "启动 Sentinel-A 🦅 主控哨兵..."
 python3 /app/sentinel_daemon.py 2>&1 | \
     while IFS= read -r line; do
-        echo "[Sentinel-A] $(date +%H:%M:%S) $line"
+        echo "[Sentinel-A 🦅] $(date +%H:%M:%S) $line"
     done &
 PIDS+=($!)
 
-# ── 5. 启动 OpenClaw 网关 ─────────────────────────────────────────────────────
+# ── 5. 启动 Analyst-B 守护进程（量化分析师） ─────────────────────────────────
+log "启动 Analyst-B 📊 量化分析师..."
+python3 /app/analyst_daemon.py 2>&1 | \
+    while IFS= read -r line; do
+        echo "[Analyst-B  📊] $(date +%H:%M:%S) $line"
+    done &
+PIDS+=($!)
+
+# ── 6. 启动 Guardian-C 守护进程（风控守卫） ──────────────────────────────────
+log "启动 Guardian-C 🛡️  风控守卫..."
+python3 /app/guardian_daemon.py 2>&1 | \
+    while IFS= read -r line; do
+        echo "[Guardian-C 🛡️] $(date +%H:%M:%S) $line"
+    done &
+PIDS+=($!)
+
+# ── 7. 启动 Scout-D 守护进程（游骑侦察） ─────────────────────────────────────
+log "启动 Scout-D 🔭 游骑侦察..."
+python3 /app/scout_daemon.py 2>&1 | \
+    while IFS= read -r line; do
+        echo "[Scout-D    🔭] $(date +%H:%M:%S) $line"
+    done &
+PIDS+=($!)
+
+# ── 8. 启动 OpenClaw 网关 ─────────────────────────────────────────────────────
 log "启动 OpenClaw 网关 (port 7861)..."
 PORT=7861 node /app/dist/entry.js gateway 2>&1 | \
     while IFS= read -r line; do
-        echo "[OpenClaw]   $(date +%H:%M:%S) $line"
+        echo "[OpenClaw   🌐] $(date +%H:%M:%S) $line"
     done &
 PIDS+=($!)
 
@@ -77,17 +107,17 @@ for i in $(seq 1 15); do
 done
 log "OpenClaw 网关已就绪 ✓"
 
-# ── 6. 启动 ttyd Web 终端 ─────────────────────────────────────────────────────
+# ── 9. 启动 ttyd Web 终端 ─────────────────────────────────────────────────────
 log "启动 ttyd Web 终端 (port 7862)..."
 ttyd -b /term -p 7862 -W \
     --writable \
     --client-option enableSixel=false \
     bash 2>&1 | \
     while IFS= read -r line; do
-        echo "[ttyd]       $(date +%H:%M:%S) $line"
+        echo "[ttyd       💻] $(date +%H:%M:%S) $line"
     done &
 PIDS+=($!)
 
-# ── 7. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）────────────────────────
+# ── 10. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）──────────────────────
 log "启动 Nginx 反向代理 (port 7860)..."
 exec nginx -g 'daemon off; error_log /dev/stderr error;'

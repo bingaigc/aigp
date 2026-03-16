@@ -1,6 +1,6 @@
 {
   "name": "sentinel-alert",
-  "version": "1.1.0",
-  "description": "Sentinel-A 底层心跳与战报监听器 — 订阅 Redis 总线并向 OpenClaw 前端主动推送弹窗",
+  "version": "2.0.0",
+  "description": "多智能体消息总线 — 汇聚 Sentinel-A/Analyst-B/Guardian-C/Scout-D 四大 AI 员工的实时播报，主动推送至 OpenClaw 前端",
   "permissions": ["chat:write", "system:events"]
 }
