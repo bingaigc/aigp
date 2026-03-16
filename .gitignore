@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+*.pyo
+skills/sentinel-alert/node_modules/
