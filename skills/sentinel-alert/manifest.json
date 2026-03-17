@@ -1,0 +1,6 @@
+{
+  "name": "sentinel-alert",
+  "version": "2.0.0",
+  "description": "多智能体消息总线 — 汇聚 Sentinel-A/Analyst-B/Guardian-C/Scout-D 四大 AI 员工的实时播报，主动推送至 OpenClaw 前端",
+  "permissions": ["chat:write", "system:events"]
+}

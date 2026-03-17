@@ -1,0 +1,9 @@
+{
+  "name": "sentinel-alert",
+  "version": "2.0.0",
+  "main": "index.js",
+  "description": "Multi-agent hub skill for OpenClaw — Sentinel-A / Analyst-B / Guardian-C / Scout-D",
+  "dependencies": {
+    "redis": "^4.6.14"
+  }
+}
