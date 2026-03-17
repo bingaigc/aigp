@@ -101,6 +101,12 @@ COPY scout_daemon.py    /app/scout_daemon.py
 # ── 11. 离线回测引擎 ──────────────────────────────────────────────────────────
 COPY backtest_engine.py /app/backtest_engine.py
 
+# ── 12b. 银河战舰模型中转网关 ─────────────────────────────────────────────────
+COPY gateway/ /app/gateway/
+
+# ── 12c. 共享工具模块（model_client 等） ──────────────────────────────────────
+COPY utils/ /app/utils/
+
 # ── 12. OpenClaw Skill（Redis 监听 → 前端主动推送） ──────────────────────────
 COPY skills/sentinel-alert/ /root/.openclaw/skills/sentinel-alert/
 RUN npm install --prefix /root/.openclaw/skills/sentinel-alert \

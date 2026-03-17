@@ -33,13 +33,27 @@ CHANNEL      = 'OPENCLAW_ALERTS'
 AGENT_NAME   = 'Scout-D'
 HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
+# ── 银河战舰：中转网关 + 专属模型配置 ───────────────────────────────────────
+# SCOUT_D_MODEL: 游骑侦察首选超低延迟模型（盘中实时三段触发，要求秒级响应）
+MODEL_GATEWAY_URL = os.environ.get('MODEL_GATEWAY_URL', '')
+AGENT_MODEL = os.environ.get(
+    'SCOUT_D_MODEL',
+    'nvidia/nemotron-mini-4b-instruct',  # 默认：极低延迟、适合盘中实时侦察
+)
+
 # 筛选阈值
 MIN_SEAL_FUND_WAN = 10_000   # 最低封板资金（万元）：1 亿元
 MAX_BOMB_COUNT    = 1        # 最大允许炸板次数
 
 # ── 客户端 ──────────────────────────────────────────────────────────────────
+# 路由优先级：中转网关 > Volcengine ARK > 离线模式
 ai_client: Client | None = None
-if ARK_API_KEY:
+MODEL_ID: str = ARK_MODEL_ID  # 实际使用的 model 参数
+if MODEL_GATEWAY_URL:
+    ai_client = Client(api_key='gateway', base_url=MODEL_GATEWAY_URL)
+    MODEL_ID = AGENT_MODEL
+    log.info('银河战舰模式已启用：网关=%s  模型=%s', MODEL_GATEWAY_URL, MODEL_ID)
+elif ARK_API_KEY:
     ai_client = Client(
         api_key=ARK_API_KEY,
         base_url='https://ark.cn-beijing.volces.com/api/v3',
@@ -171,7 +185,7 @@ def _ai_report(session: str, date_str: str,
     )
     try:
         resp = ai_client.chat.completions.create(
-            model=ARK_MODEL_ID,
+            model=MODEL_ID,
             messages=[
                 {'role': 'system', 'content': '你是 Scout-D，冷血市场侦察员，发现机会也发现陷阱。'},
                 {'role': 'user',   'content': prompt},

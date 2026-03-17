@@ -33,12 +33,26 @@ CHANNEL      = 'OPENCLAW_ALERTS'
 AGENT_NAME   = 'Analyst-B'
 HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
+# ── 银河战舰：中转网关 + 专属模型配置 ───────────────────────────────────────
+# ANALYST_B_MODEL: 量化分析首选代码+数据推理强的模型
+MODEL_GATEWAY_URL = os.environ.get('MODEL_GATEWAY_URL', '')
+AGENT_MODEL = os.environ.get(
+    'ANALYST_B_MODEL',
+    'qwen/qwen2.5-coder-32b-instruct',  # 默认：代码+数据分析最强
+)
+
 # 盘中分析时间点
 ANALYSIS_TIMES = ('09:30', '10:30', '11:00', '13:30', '14:30')
 
 # ── 客户端 ──────────────────────────────────────────────────────────────────
+# 路由优先级：中转网关 > Volcengine ARK > 离线模式
 ai_client: Client | None = None
-if ARK_API_KEY:
+MODEL_ID: str = ARK_MODEL_ID  # 实际使用的 model 参数
+if MODEL_GATEWAY_URL:
+    ai_client = Client(api_key='gateway', base_url=MODEL_GATEWAY_URL)
+    MODEL_ID = AGENT_MODEL
+    log.info('银河战舰模式已启用：网关=%s  模型=%s', MODEL_GATEWAY_URL, MODEL_ID)
+elif ARK_API_KEY:
     ai_client = Client(
         api_key=ARK_API_KEY,
         base_url='https://ark.cn-beijing.volces.com/api/v3',
@@ -151,7 +165,7 @@ def analyze_sectors() -> None:
         )
         try:
             resp = ai_client.chat.completions.create(
-                model=ARK_MODEL_ID,
+                model=MODEL_ID,
                 messages=[
                     {'role': 'system', 'content': '你是 Analyst-B，冷血量化板块分析师。'},
                     {'role': 'user',   'content': prompt},

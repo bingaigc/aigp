@@ -88,7 +88,28 @@ echo -e "  💾 HF Backup   — 每 ${BACKUP_INTERVAL_MIN} 分钟自动备份至
 echo "======================================================="
 echo ""
 
-# ── 4. 启动 Sentinel-A 守护进程（主控哨兵） ───────────────────────────────────
+# ── 4. 银河战舰模型中转网关（可选，MODEL_GATEWAY_URL 指向本机时自动启动） ────────
+MODEL_GATEWAY_PORT="${MODEL_GATEWAY_PORT:-8090}"
+# 判断是否需要本地网关：MODEL_GATEWAY_URL 精确匹配 127.0.0.1:PORT 或 localhost:PORT
+_gw_url="${MODEL_GATEWAY_URL:-}"
+if [[ "$_gw_url" =~ ^https?://(127\.0\.0\.1|localhost):${MODEL_GATEWAY_PORT}(/|$) ]]; then
+    log "启动 银河战舰模型中转网关 🌌 (port ${MODEL_GATEWAY_PORT})..."
+    python3 /app/gateway/model_router.py 2>&1 | \
+        while IFS= read -r line; do
+            echo "[ModelGateway🌌] $(date +%H:%M:%S) $line"
+        done &
+    PIDS+=($!)
+    # 等待网关就绪（最多30秒，兼顾冷启动较慢的环境）
+    for i in $(seq 1 30); do
+        curl -sf "http://127.0.0.1:${MODEL_GATEWAY_PORT}/health" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    curl -sf "http://127.0.0.1:${MODEL_GATEWAY_PORT}/health" >/dev/null 2>&1 \
+        && log "银河战舰网关已就绪 ✓ (port ${MODEL_GATEWAY_PORT})" \
+        || warn "银河战舰网关可能未就绪，继续启动（非致命）"
+fi
+
+# ── 5. 启动 Sentinel-A 守护进程（主控哨兵） ───────────────────────────────────
 log "启动 Sentinel-A 🦅 主控哨兵..."
 python3 /app/sentinel_daemon.py 2>&1 | \
     while IFS= read -r line; do
@@ -96,7 +117,7 @@ python3 /app/sentinel_daemon.py 2>&1 | \
     done &
 PIDS+=($!)
 
-# ── 5. 启动 Analyst-B 守护进程（量化分析师） ─────────────────────────────────
+# ── 6. 启动 Analyst-B 守护进程（量化分析师） ─────────────────────────────────
 log "启动 Analyst-B 📊 量化分析师..."
 python3 /app/analyst_daemon.py 2>&1 | \
     while IFS= read -r line; do
@@ -104,7 +125,7 @@ python3 /app/analyst_daemon.py 2>&1 | \
     done &
 PIDS+=($!)
 
-# ── 6. 启动 Guardian-C 守护进程（风控守卫） ──────────────────────────────────
+# ── 7. 启动 Guardian-C 守护进程（风控守卫） ──────────────────────────────────
 log "启动 Guardian-C 🛡️  风控守卫..."
 python3 /app/guardian_daemon.py 2>&1 | \
     while IFS= read -r line; do
@@ -112,7 +133,7 @@ python3 /app/guardian_daemon.py 2>&1 | \
     done &
 PIDS+=($!)
 
-# ── 7. 启动 Scout-D 守护进程（游骑侦察） ─────────────────────────────────────
+# ── 8. 启动 Scout-D 守护进程（游骑侦察） ─────────────────────────────────────
 log "启动 Scout-D 🔭 游骑侦察..."
 python3 /app/scout_daemon.py 2>&1 | \
     while IFS= read -r line; do
@@ -120,7 +141,7 @@ python3 /app/scout_daemon.py 2>&1 | \
     done &
 PIDS+=($!)
 
-# ── 8. 启动 OpenClaw 网关 ─────────────────────────────────────────────────────
+# ── 9. 启动 OpenClaw 网关 ─────────────────────────────────────────────────────
 log "启动 OpenClaw 网关 (port 7861)..."
 PORT=7861 node /app/dist/entry.js gateway 2>&1 | \
     while IFS= read -r line; do
@@ -135,7 +156,7 @@ for i in $(seq 1 15); do
 done
 log "OpenClaw 网关已就绪 ✓"
 
-# ── 9. 启动 ttyd Web 终端 ─────────────────────────────────────────────────────
+# ── 10. 启动 ttyd Web 终端 ─────────────────────────────────────────────────────
 log "启动 ttyd Web 终端 (port 7862)..."
 ttyd -b /term -p 7862 -W \
     --writable \
@@ -146,7 +167,7 @@ ttyd -b /term -p 7862 -W \
     done &
 PIDS+=($!)
 
-# ── 10. 启动定时备份循环（后台） ─────────────────────────────────────────────
+# ── 11. 启动定时备份循环（后台） ─────────────────────────────────────────────
 log "启动定时备份 💾 (间隔 ${BACKUP_INTERVAL_MIN} 分钟)..."
 (
     BACKUP_SLEEP=$(( BACKUP_INTERVAL_MIN * 60 ))
@@ -160,6 +181,6 @@ log "启动定时备份 💾 (间隔 ${BACKUP_INTERVAL_MIN} 分钟)..."
 ) &
 PIDS+=($!)
 
-# ── 11. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）──────────────────────
+# ── 12. 启动 Nginx 路由（前台，作为 PID 1 子进程监控点）──────────────────────
 log "启动 Nginx 反向代理 (port 7860)..."
 exec nginx -g 'daemon off; error_log /dev/stderr error;'

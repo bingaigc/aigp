@@ -33,6 +33,14 @@ CHANNEL      = 'OPENCLAW_ALERTS'
 AGENT_NAME   = 'Guardian-C'
 HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
+# ── 银河战舰：中转网关 + 专属模型配置 ───────────────────────────────────────
+# GUARDIAN_C_MODEL: 风控哨兵首选高频低延迟模型（每5分钟调用一次）
+MODEL_GATEWAY_URL = os.environ.get('MODEL_GATEWAY_URL', '')
+AGENT_MODEL = os.environ.get(
+    'GUARDIAN_C_MODEL',
+    'meta/llama-3.1-8b-instruct',  # 默认：低延迟、适合高频风控判断
+)
+
 # 风险阈值
 RISK_HIGH_THRESHOLD    = 7.0   # 风险系数超过此值发出预警
 RISK_EXTREME_THRESHOLD = 8.0   # 风险系数超过此值为"极高风险"
@@ -40,8 +48,14 @@ INDEX_DROP_THRESHOLD   = -2.0  # 大盘单日跌幅触发系统性扫描（百�
 BOARD_HEALTH_THRESHOLD = 40.0  # 连板健康度低于此值触发退潮预警
 
 # ── 客户端 ──────────────────────────────────────────────────────────────────
+# 路由优先级：中转网关 > Volcengine ARK > 离线模式
 ai_client: Client | None = None
-if ARK_API_KEY:
+MODEL_ID: str = ARK_MODEL_ID  # 实际使用的 model 参数
+if MODEL_GATEWAY_URL:
+    ai_client = Client(api_key='gateway', base_url=MODEL_GATEWAY_URL)
+    MODEL_ID = AGENT_MODEL
+    log.info('银河战舰模式已启用：网关=%s  模型=%s', MODEL_GATEWAY_URL, MODEL_ID)
+elif ARK_API_KEY:
     ai_client = Client(
         api_key=ARK_API_KEY,
         base_url='https://ark.cn-beijing.volces.com/api/v3',
@@ -201,7 +215,7 @@ def risk_scan() -> None:
         )
         try:
             resp = ai_client.chat.completions.create(
-                model=ARK_MODEL_ID,
+                model=MODEL_ID,
                 messages=[
                     {'role': 'system', 'content': '你是 Guardian-C，冷血风控守卫，保护本金为第一使命。'},
                     {'role': 'user',   'content': prompt},

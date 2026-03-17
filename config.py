@@ -109,6 +109,69 @@ if ark_api_key:
 else:
     print("[config] 警告: ARK_API_KEY 未设置，AI 分析功能将不可用。")
 
+# ── 银河战舰：中转网关（MODEL_GATEWAY_URL 设置后统一接管所有模型访问） ────────────
+# 将 OpenClaw 的 primary provider 指向本地网关，网关再路由到 NVIDIA NIM / HF / ARK
+_gateway_url     = os.environ.get('MODEL_GATEWAY_URL', '')
+_nvidia_api_key  = os.environ.get('NVIDIA_API_KEY', '')
+_hf_api_key      = os.environ.get('HF_API_KEY', '')
+
+if _gateway_url:
+    providers = config.setdefault('models', {}).setdefault('providers', {})
+    providers['galaxy-gateway'] = {
+        'api':     'openai-completions',
+        'baseUrl': _gateway_url,
+        'apiKey':  'gateway',
+        'models':  [
+            # ── 银河战舰核心舰队（NVIDIA NIM，均已验证可用）──────────────────
+            # 综合推理旗舰（Sentinel-A 复盘战报，推荐）
+            {'id': 'nvidia/llama-3.3-nemotron-super-49b-v1',         'name': '🦅 Nemotron-Super-49B (旗舰推理)'},
+            {'id': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',        'name': '🦅 Nemotron-Ultra-253B (超强推理)'},
+            # 量化分析（Analyst-B 板块轮动，推荐）
+            {'id': 'qwen/qwen2.5-coder-32b-instruct',                'name': '📊 Qwen2.5-Coder-32B (量化分析)'},
+            {'id': 'qwen/qwq-32b',                                   'name': '📊 QwQ-32B (深度推理)'},
+            {'id': 'deepseek-ai/deepseek-r1-distill-qwen-32b',       'name': '📊 DeepSeek-R1-Qwen32B (蒸馏推理)'},
+            # 风险评估（Guardian-C 低延迟，推荐）
+            {'id': 'meta/llama-3.1-8b-instruct',                     'name': '🛡️ Llama-3.1-8B (低延迟风控)'},
+            {'id': 'microsoft/phi-4-mini-instruct',                  'name': '🛡️ Phi-4-Mini (轻量风控)'},
+            # 实时侦察（Scout-D 超低延迟，推荐）
+            {'id': 'nvidia/nemotron-mini-4b-instruct',               'name': '🔭 Nemotron-Mini-4B (极速侦察)'},
+            {'id': 'meta/llama-3.2-3b-instruct',                     'name': '🔭 Llama-3.2-3B (超快侦察)'},
+            # 中文优化模型（可替换任意 Agent）
+            {'id': 'qwen/qwen2.5-7b-instruct',                       'name': '🇨🇳 Qwen2.5-7B (中文优化)'},
+            {'id': 'deepseek-ai/deepseek-r1-distill-llama-8b',       'name': '🇨🇳 DeepSeek-R1-8B (中文推理)'},
+            # 其他可选成员
+            {'id': 'meta/llama-4-maverick-17b-128e-instruct',        'name': 'Llama-4-Maverick-17B'},
+            {'id': 'mistralai/mistral-small-3.1-24b-instruct-2503',  'name': 'Mistral-Small-3.1-24B'},
+            {'id': 'google/gemma-3-27b-it',                          'name': 'Gemma-3-27B'},
+        ],
+    }
+    # 当网关启动时，将 OpenClaw 自身的对话主模型也切换到网关
+    (config
+        .setdefault('agents', {})
+        .setdefault('defaults', {})
+        .setdefault('model', {})
+    )['primary'] = 'galaxy-gateway/nvidia/llama-3.3-nemotron-super-49b-v1'
+    print(f"[config] 银河战舰网关已配置，baseUrl={_gateway_url}，接管 OpenClaw 对话模型")
+
+elif _nvidia_api_key:
+    # 未启动本地网关但有 NVIDIA Key：直接注册 NVIDIA NIM 作为第二 provider
+    providers = config.setdefault('models', {}).setdefault('providers', {})
+    providers['nvidia-nim'] = {
+        'api':     'openai-completions',
+        'baseUrl': 'https://integrate.api.nvidia.com/v1',
+        'apiKey':  _nvidia_api_key,
+        'models':  [
+            {'id': 'nvidia/llama-3.3-nemotron-super-49b-v1',    'name': '🦅 Nemotron-Super-49B'},
+            {'id': 'nvidia/nemotron-mini-4b-instruct',           'name': '🔭 Nemotron-Mini-4B'},
+            {'id': 'meta/llama-3.3-70b-instruct',                'name': 'Llama-3.3-70B'},
+            {'id': 'qwen/qwen2.5-coder-32b-instruct',            'name': '📊 Qwen2.5-Coder-32B'},
+            {'id': 'deepseek-ai/deepseek-r1-distill-qwen-32b',   'name': '📊 DeepSeek-R1-Qwen32B'},
+            {'id': 'meta/llama-3.1-8b-instruct',                 'name': '🛡️ Llama-3.1-8B'},
+            {'id': 'mistralai/mistral-small-3.1-24b-instruct-2503', 'name': 'Mistral-Small-24B'},
+        ],
+    }
+    print(f"[config] NVIDIA NIM 直连已配置（无本地网关模式）")
+
 # ── 多智能体注册 ─────────────────────────────────────────────────────────────
 agent_registry = config.setdefault('agents', {}).setdefault('registry', [])
 

@@ -17,6 +17,7 @@
 8. [常见问题排查](#8-常见问题排查)
 9. [sentinel-alert Skill 安装指南](#9-sentinel-alert-skill-安装指南)
 10. [2核16G 低内存部署调优](#10-2核16g-低内存部署调优)
+11. [银河战舰多模型调度方案](#11-银河战舰多模型调度方案)
 
 ---
 
@@ -732,3 +733,182 @@ HF Hub 备份期间 `huggingface_hub` 上传文件会额外消耗内存，降低
 ---
 
 *最后更新：2026-03-16*
+
+---
+
+## 11. 银河战舰多模型调度方案
+
+> **工程原则**：不修改 OpenClaw 底层源码，通过自建中转网关实现多厂商模型路由。
+> 网关对 OpenClaw 透明，呈现为一个标准 OpenAI 兼容端点。
+
+---
+
+### 11.1 哪些模型在 OpenClaw 中可以用？
+
+OpenClaw 支持所有 **OpenAI 兼容 API** (`/v1/chat/completions`)，因此以下来源的模型均可接入：
+
+| 接入平台 | API 端点 | 覆盖的模型厂商 |
+|---|---|---|
+| **NVIDIA NIM** ⭐ | `https://integrate.api.nvidia.com/v1` | nvidia / mistralai / meta / qwen / deepseek-ai / google / microsoft / minimaxai / moonshotai / z-ai / ibm / bytedance 等 **90%+ 题目模型** |
+| **Hugging Face Inference** | `https://api-inference.huggingface.co/v1` | 所有 HF Hub 上的 text-generation 模型（开源全覆盖，备用） |
+| **Volcengine ARK** | `https://ark.cn-beijing.volces.com/api/v3` | DeepSeek R1/V3（原有接入，继续保留） |
+
+#### 题目模型兼容性一览
+
+| 系列 | NVIDIA NIM 可用 | 推荐等级 | 用途建议 |
+|---|---|---|---|
+| **Mistral AI** | ✅ 全部主流版本 | ⭐⭐⭐ | 多语言理解、综合推理 |
+| `mistralai/mistral-small-3.1-24b-instruct-2503` | ✅ | ⭐⭐⭐⭐ | **Analyst-B 推荐** |
+| `mistralai/mistral-large-3-675b-instruct-2512` | ✅ | ⭐⭐⭐⭐⭐ | 旗舰推理，适合 Sentinel-A |
+| **NVIDIA** | ✅ 全部 | ⭐⭐⭐⭐⭐ | 系统优化，低延迟 |
+| `nvidia/llama-3.3-nemotron-super-49b-v1` | ✅ | ⭐⭐⭐⭐⭐ | **Sentinel-A 默认** |
+| `nvidia/nemotron-mini-4b-instruct` | ✅ | ⭐⭐⭐⭐⭐ | **Scout-D 默认**（极速） |
+| `nvidia/llama-3.1-nemotron-ultra-253b-v1` | ✅ | ⭐⭐⭐⭐⭐ | 超旗舰，适合复杂复盘 |
+| **Qwen (通义千问)** | ✅ 主流版本 | ⭐⭐⭐⭐⭐ | 中文优秀，量化分析 |
+| `qwen/qwen2.5-coder-32b-instruct` | ✅ | ⭐⭐⭐⭐⭐ | **Analyst-B 默认**（数据+代码） |
+| `qwen/qwq-32b` | ✅ | ⭐⭐⭐⭐⭐ | 深度推理 |
+| `qwen/qwen2.5-7b-instruct` | ✅ | ⭐⭐⭐⭐ | 中文快速分析 |
+| **DeepSeek** | ✅ 蒸馏版 | ⭐⭐⭐⭐⭐ | 中文推理旗舰 |
+| `deepseek-ai/deepseek-r1-distill-llama-8b` | ✅ | ⭐⭐⭐⭐⭐ | 低延迟中文推理 |
+| `deepseek-ai/deepseek-r1-distill-qwen-32b` | ✅ | ⭐⭐⭐⭐⭐ | 高质量中文复盘 |
+| **Meta (Llama)** | ✅ 全部 | ⭐⭐⭐⭐ | 均衡，生态成熟 |
+| `meta/llama-3.3-70b-instruct` | ✅ | ⭐⭐⭐⭐⭐ | 综合推理旗舰 |
+| `meta/llama-3.1-8b-instruct` | ✅ | ⭐⭐⭐⭐⭐ | **Guardian-C 默认**（低延迟） |
+| `meta/llama-3.2-3b-instruct` | ✅ | ⭐⭐⭐⭐ | 超轻量，实时侦察 |
+| `meta/llama-4-maverick-17b-128e-instruct` | ✅ | ⭐⭐⭐⭐⭐ | 最新 Llama 4 系列 |
+| **Google (Gemma)** | ✅ 主流版本 | ⭐⭐⭐ | 轻量快速 |
+| `google/gemma-3-27b-it` | ✅ | ⭐⭐⭐⭐ | 综合能力强 |
+| **Microsoft (Phi)** | ✅ 主流版本 | ⭐⭐⭐⭐ | 小参数高质量 |
+| `microsoft/phi-4-mini-instruct` | ✅ | ⭐⭐⭐⭐⭐ | 轻量风控（Guardian-C 备选） |
+| `microsoft/phi-4-multimodal-instruct` | ✅ | ⭐⭐⭐⭐ | 多模态（图表分析） |
+| **MiniMax** | ✅ | ⭐⭐⭐ | 中文长上下文 |
+| **Moonshot AI (Kimi)** | ✅ | ⭐⭐⭐ | 中文长上下文 |
+| **IBM Granite** | ✅ | ⭐⭐⭐ | 企业级可靠 |
+| **ByteDance Seed** | ✅ | ⭐⭐⭐ | 中文优化 |
+| 日语/多语种专属系列 | ⚠️ 部分可用 | ⭐⭐ | 非中文场景专用，本系统不推荐 |
+
+> **注意**：部分最新/超大模型（如 `deepseek-ai/deepseek-v3.2`、`qwen/qwen3.5-397b`）
+> 在 NVIDIA NIM 的上线进度不同，建议先在 [build.nvidia.com](https://build.nvidia.com) 确认可用性。
+
+---
+
+### 11.2 银河战舰调度架构
+
+```
+Hugging Face Spaces / Docker
+│
+├── OpenClaw 网关 :7861
+│   └── 对话 UI（primary model = galaxy-gateway/nvidia/llama-3.3-nemotron-super-49b-v1）
+│
+├── 银河战舰模型中转网关 :8090  ← gateway/model_router.py（新增）
+│   ├── POST /v1/chat/completions
+│   │   ├── model 含 volcengine/ 或 ep-* → Volcengine ARK（DeepSeek R1/V3）
+│   │   ├── model 含 nvidia/meta/qwen/mistralai/... → NVIDIA NIM ⭐
+│   │   └── NVIDIA_API_KEY 未设置时降级 → HuggingFace Inference API
+│   └── GET /health → {"status": "ok"}
+│
+├── Sentinel-A 🦅  MODEL_GATEWAY_URL=http://127.0.0.1:8090
+│   └── 模型: SENTINEL_A_MODEL=nvidia/llama-3.3-nemotron-super-49b-v1
+│
+├── Analyst-B 📊   MODEL_GATEWAY_URL=http://127.0.0.1:8090
+│   └── 模型: ANALYST_B_MODEL=qwen/qwen2.5-coder-32b-instruct
+│
+├── Guardian-C 🛡️  MODEL_GATEWAY_URL=http://127.0.0.1:8090
+│   └── 模型: GUARDIAN_C_MODEL=meta/llama-3.1-8b-instruct
+│
+└── Scout-D 🔭     MODEL_GATEWAY_URL=http://127.0.0.1:8090
+    └── 模型: SCOUT_D_MODEL=nvidia/nemotron-mini-4b-instruct
+```
+
+---
+
+### 11.3 需要配置的环境变量（银河战舰专属）
+
+#### 必填（至少选一个 API Key）
+
+| 环境变量 | 说明 | 获取地址 |
+|---|---|---|
+| `NVIDIA_API_KEY` | NVIDIA NIM API Key（**推荐**，接入 90%+ 题目模型） | [build.nvidia.com](https://build.nvidia.com) → 右上角 "Get API Key" |
+| `HF_API_KEY` | Hugging Face Inference API Key（`hf_xxx` 格式，降级备用） | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `ARK_API_KEY` | Volcengine ARK Key（DeepSeek，原有接入，可选保留） | 火山方舟控制台 |
+
+#### 可选：中转网关地址
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MODEL_GATEWAY_URL` | `""` | 填写 `http://127.0.0.1:8090` 启用本地银河战舰网关 |
+| `MODEL_GATEWAY_PORT` | `8090` | 网关监听端口（修改时需同步 `MODEL_GATEWAY_URL`） |
+
+#### 可选：各 Agent 专属模型
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `SENTINEL_A_MODEL` | `nvidia/llama-3.3-nemotron-super-49b-v1` | Sentinel-A 🦅 使用的模型（推荐强推理） |
+| `ANALYST_B_MODEL` | `qwen/qwen2.5-coder-32b-instruct` | Analyst-B 📊 使用的模型（推荐数据+代码强） |
+| `GUARDIAN_C_MODEL` | `meta/llama-3.1-8b-instruct` | Guardian-C 🛡️ 使用的模型（推荐低延迟） |
+| `SCOUT_D_MODEL` | `nvidia/nemotron-mini-4b-instruct` | Scout-D 🔭 使用的模型（推荐超低延迟） |
+
+> 模型名称使用 `org/model-id` 格式（NVIDIA NIM 标准），直接传给网关路由。
+
+---
+
+### 11.4 快速配置示例
+
+#### 方案一：最小配置（仅 NVIDIA NIM，无本地网关）
+
+```bash
+# 在 HuggingFace Spaces → Settings → Variables and secrets 中添加：
+NVIDIA_API_KEY = nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+这种模式下：
+- OpenClaw UI 对话可选择 NVIDIA NIM 上的所有模型
+- Python 守护进程仍使用 ARK_API_KEY（如有），或离线运行
+
+#### 方案二：银河战舰全配置（推荐）
+
+```bash
+# ── 必填 ──────────────────────────────────────────────────────
+NVIDIA_API_KEY    = nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxx
+ARK_API_KEY       = 你的Volcengine ARK Key（可选，保留DeepSeek路由）
+
+# ── 启用本地中转网关 ──────────────────────────────────────────
+MODEL_GATEWAY_URL = http://127.0.0.1:8090
+
+# ── 各 Agent 专属型号（按需调整）────────────────────────────────
+SENTINEL_A_MODEL  = deepseek-ai/deepseek-r1-distill-qwen-32b
+ANALYST_B_MODEL   = qwen/qwen2.5-coder-32b-instruct
+GUARDIAN_C_MODEL  = meta/llama-3.1-8b-instruct
+SCOUT_D_MODEL     = nvidia/nemotron-mini-4b-instruct
+
+# ── OpenClaw 频道绑定（可选）────────────────────────────────────
+OPENCLAW_CHANNEL_ID = your-channel-id
+```
+
+#### 方案三：极速版（全部用 NVIDIA 小模型，最低延迟）
+
+```bash
+NVIDIA_API_KEY    = nvapi-xxxxxxxxxxxxxxxxxxxxxxxxxx
+MODEL_GATEWAY_URL = http://127.0.0.1:8090
+SENTINEL_A_MODEL  = meta/llama-3.3-70b-instruct
+ANALYST_B_MODEL   = qwen/qwen2.5-7b-instruct
+GUARDIAN_C_MODEL  = nvidia/nemotron-mini-4b-instruct
+SCOUT_D_MODEL     = meta/llama-3.2-3b-instruct
+```
+
+---
+
+### 11.5 网关技术实现（gateway/model_router.py）
+
+- **零额外依赖**：纯 Python 标准库（`http.server` + `urllib`），无需安装额外 pip 包
+- **自动路由规则**：
+  1. 模型名以 `ep-` 开头或含 `volcengine/` → Volcengine ARK
+  2. 组织前缀在 NVIDIA NIM 列表中（nvidia/meta/qwen/mistralai 等）→ NVIDIA NIM
+  3. NVIDIA_API_KEY 未设置时降级 → HuggingFace Inference
+- **CORS 支持**：允许 OpenClaw 前端跨域调用
+- **健康检查**：`GET /health` 返回 `{"status": "ok"}`
+- **自动启动**：`start_hf.sh` 检测到 `MODEL_GATEWAY_URL` 指向本机时自动启动网关
+
+---
+
+*最后更新：2026-03-17*

@@ -29,9 +29,25 @@ REDIS_CHANNEL = 'OPENCLAW_ALERTS'
 REPORT_TIME = os.environ.get('REPORT_TIME', '16:30')  # 可通过环境变量调整
 HEARTBEAT_TTL = int(os.environ.get('HEARTBEAT_TTL', '360'))  # 心跳 key 存活时间（秒）
 
+# ── 银河战舰：中转网关 + 专属模型配置 ───────────────────────────────────────
+# MODEL_GATEWAY_URL: 指向 gateway/model_router.py 的地址（如 http://127.0.0.1:8090）
+# SENTINEL_A_MODEL:  Sentinel-A 专属模型（推荐强推理、中文优秀的大模型）
+MODEL_GATEWAY_URL = os.environ.get('MODEL_GATEWAY_URL', '')
+AGENT_MODEL = os.environ.get(
+    'SENTINEL_A_MODEL',
+    'nvidia/llama-3.3-nemotron-super-49b-v1',  # 默认：NVIDIA NIM 顶级推理模型
+)
+
 # ── 客户端 ──────────────────────────────────────────────────────────────────
+# 路由优先级：中转网关 > Volcengine ARK > 离线模式
 ai_client: Client | None = None
-if ARK_API_KEY:
+MODEL_ID: str = ARK_MODEL_ID  # 实际使用的 model 参数
+if MODEL_GATEWAY_URL:
+    # 银河战舰模式：通过中转网关访问多厂商模型
+    ai_client = Client(api_key='gateway', base_url=MODEL_GATEWAY_URL)
+    MODEL_ID = AGENT_MODEL
+    log.info('银河战舰模式已启用：网关=%s  模型=%s', MODEL_GATEWAY_URL, MODEL_ID)
+elif ARK_API_KEY:
     ai_client = Client(
         api_key=ARK_API_KEY,
         base_url='https://ark.cn-beijing.volces.com/api/v3',
@@ -137,7 +153,7 @@ def generate_daily_report() -> None:
         )
         try:
             resp = ai_client.chat.completions.create(
-                model=ARK_MODEL_ID,
+                model=MODEL_ID,
                 messages=[
                     {'role': 'system', 'content': '你是 Sentinel-A，冷血量化复盘机器。'},
                     {'role': 'user', 'content': prompt},
